@@ -22,6 +22,8 @@ from mpc_spacecraft.config import (
 )
 from mpc_spacecraft.simulation import run_closed_loop_test
 from mpc_spacecraft.utilities.utils import BODY_FORWARD_VEC3
+from experiments.single_target_convergence import make_base_config, parse_args
+from experiments.single_target_robustness import parse_args as parse_robustness_args
 
 
 @pytest.mark.unit
@@ -102,6 +104,31 @@ def test_single_target_config_uses_requested_timing_and_mekf_noise() -> None:
     assert config.sensors.enable_measurement_noise is True
     assert config.sensors.enable_bias_random_walk is True
     assert config.targets.targets.loc[0, "req_obs_time"] == pytest.approx(30.0)
+
+
+@pytest.mark.unit
+def test_convergence_cli_toggles_disturbance_rejection() -> None:
+    assert parse_args([]).disturbance_rejection is False
+    assert parse_args(["--disturbance-rejection"]).disturbance_rejection is True
+    assert parse_args(["--no-disturbance-rejection"]).disturbance_rejection is False
+
+    enabled = make_base_config(disturbance_rejection=True)
+    disabled = make_base_config(disturbance_rejection=False)
+    assert enabled.mpc.enable_disturbance_rejection is True
+    assert disabled.mpc.enable_disturbance_rejection is False
+
+
+@pytest.mark.unit
+def test_robustness_cli_toggles_disturbance_rejection() -> None:
+    assert parse_robustness_args([]).disturbance_rejection is False
+    assert (
+        parse_robustness_args(["--disturbance-rejection"]).disturbance_rejection
+        is True
+    )
+    assert (
+        parse_robustness_args(["--no-disturbance-rejection"]).disturbance_rejection
+        is False
+    )
 
 
 @pytest.mark.integration

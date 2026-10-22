@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import replace
 import json
 from pathlib import Path
 from typing import Any
@@ -20,12 +21,21 @@ from mpc_spacecraft.config import ClosedLoopTestConfig
 DEFAULT_OUTPUT_DIR = Path("./experiments/results/single_target_convergence")
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--max-duration", type=float, default=300.0)
     parser.add_argument("--sim-dt", type=float, default=0.01)
     parser.add_argument("--mpc-dt", type=float, default=5.0)
+    parser.add_argument(
+        "--disturbance-rejection",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help=(
+            "enable the constant-torque observer and offset-free MPC "
+            "(default: disabled)"
+        ),
+    )
     parser.add_argument(
         "--attitude-offsets-deg",
         type=float,
@@ -38,13 +48,27 @@ def parse_args() -> argparse.Namespace:
         nargs="+",
         default=[0.0, 0.1, 0.25, 0.5],
     )
-    return parser.parse_args()
+    return parser.parse_args(argv)
+
+
+def make_base_config(*, disturbance_rejection: bool) -> ClosedLoopTestConfig:
+    """Build the shared sweep configuration from CLI feature toggles."""
+    config = ClosedLoopTestConfig.defaults(show_progress=False)
+    return replace(
+        config,
+        mpc=replace(
+            config.mpc,
+            enable_disturbance_rejection=disturbance_rejection,
+        ),
+    )
 
 
 def main() -> None:
     args = parse_args()
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    base_config = ClosedLoopTestConfig.defaults(show_progress=False)
+    base_config = make_base_config(
+        disturbance_rejection=args.disturbance_rejection
+    )
 
     attitude_cases: list[SingleTargetCaseResult] = []
     for offset in args.attitude_offsets_deg:
@@ -101,6 +125,9 @@ def main() -> None:
             "mekf_enabled": True,
             "measurement_noise_enabled": base_config.sensors.enable_measurement_noise,
             "bias_random_walk_enabled": base_config.sensors.enable_bias_random_walk,
+            "disturbance_rejection_enabled": (
+                base_config.mpc.enable_disturbance_rejection
+            ),
             "attitude_offsets_deg": args.attitude_offsets_deg,
             "angular_rates_deg_s": args.angular_rates_deg_s,
         },

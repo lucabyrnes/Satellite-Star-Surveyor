@@ -84,6 +84,14 @@ class ClosedLoopMPCConfig:
     )
     q_terminal: FloatArray | None = None
     model_inertia: FloatArray | None = None
+    enable_disturbance_rejection: bool = False
+    disturbance_observer_time_constant_s: float = 300.0
+    disturbance_observer_max_abs_torque: FloatArray = field(
+        default_factory=lambda: 1.0e-3 * np.ones(3, dtype=np.float64)
+    )
+    disturbance_observer_initial_torque: FloatArray = field(
+        default_factory=lambda: np.zeros(3, dtype=np.float64)
+    )
 
 
 @dataclass(frozen=True)

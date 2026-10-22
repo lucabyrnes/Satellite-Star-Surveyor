@@ -18,6 +18,9 @@ from mpc_spacecraft.controllers.error_dynamics_adapters import (
 )
 from mpc_spacecraft.dynamics import DisturbanceModel, SpacecraftDynamics
 from mpc_spacecraft.estimation.sensor_models import GyroConfig, IMUConfig
+from mpc_spacecraft.estimation.torque_disturbance_observer import (
+    ConstantTorqueObserver,
+)
 from mpc_spacecraft.guidance import AstropySunDirectionModel, Guidance
 from mpc_spacecraft.planner import StarPlanner
 from mpc_spacecraft.simulation.clock import SimulationClock
@@ -36,6 +39,7 @@ from mpc_spacecraft.utilities.utils import (
     SensorRigidBodyState,
 )
 
+
 @dataclass(frozen=True)
 class ClosedLoopLogRecord:
     """A single plotting-friendly closed-loop simulation log record."""
@@ -47,6 +51,7 @@ class ClosedLoopLogRecord:
     estimated_state: FloatArray
     goal_rotation_state: FloatArray
     control: FloatArray
+    estimated_disturbance_torque: FloatArray
     guidance_mode_value: int
     guidance_mode_name: str
     is_complete: bool
@@ -94,6 +99,10 @@ class ClosedLoopTestResult:
                 [r.goal_rotation_state for r in self.records], dtype=np.float64
             ),
             "control": np.array([r.control for r in self.records], dtype=np.float64),
+            "estimated_disturbance_torque": np.array(
+                [r.estimated_disturbance_torque for r in self.records],
+                dtype=np.float64,
+            ),
             "guidance_mode_value": np.array(
                 [r.guidance_mode_value for r in self.records], dtype=np.int64
             ),
@@ -148,6 +157,9 @@ class ClosedLoopTestResult:
                 "control_tx": record.control[0],
                 "control_ty": record.control[1],
                 "control_tz": record.control[2],
+                "estimated_disturbance_tx": record.estimated_disturbance_torque[0],
+                "estimated_disturbance_ty": record.estimated_disturbance_torque[1],
+                "estimated_disturbance_tz": record.estimated_disturbance_torque[2],
             }
             if record.mekf_covariance_diag is not None:
                 for idx, value in enumerate(record.mekf_covariance_diag):
@@ -229,6 +241,16 @@ def run_closed_loop_test(config: ClosedLoopTestConfig | None = None) -> ClosedLo
         spacecraft.u_min,
         spacecraft.u_max,
     )
+    disturbance_observer = (
+        ConstantTorqueObserver(
+            inertia=prediction_inertia,
+            time_constant_s=mpc_config.disturbance_observer_time_constant_s,
+            max_abs_torque=mpc_config.disturbance_observer_max_abs_torque,
+            initial_torque=mpc_config.disturbance_observer_initial_torque,
+        )
+        if mpc_config.enable_disturbance_rejection
+        else None
+    )
     estimator = StateEstimationSimHandler(
         sim_state.sensor_rigid_body,
         sensors.gnss_measurement_period,
@@ -245,6 +267,7 @@ def run_closed_loop_test(config: ClosedLoopTestConfig | None = None) -> ClosedLo
 
     result = ClosedLoopTestResult(config=config)
     total_control = RigidBodyControl.zeros()
+    estimated_disturbance_torque = np.zeros(3, dtype=np.float64)
     previous_mpc_guidance_update: float | None = None
     goal_rotation_state = sim_state.rotation.copy()
     mode: IntEnum | None = None
@@ -288,9 +311,16 @@ def run_closed_loop_test(config: ClosedLoopTestConfig | None = None) -> ClosedLo
             goal_rotation_state, mode, is_complete = guidance.tick(
                 clock.now(), guidance_delta_time, cast(RigidBodyState, estimated_state.rigid_body)
             )
+            if disturbance_observer is not None:
+                estimated_disturbance_torque = disturbance_observer.update(
+                    estimated_state.rotation,
+                    total_control.torque,
+                    guidance_delta_time,
+                )
             rotation_control = mpc.get_first_control(
                 x0=estimated_state.rotation,
                 x_goal=goal_rotation_state,
+                disturbance_torque=estimated_disturbance_torque,
                 current_epoch_utc=clock.now(),
             )
             mpc_solve_success = bool(mpc.last_solve_success)
@@ -317,6 +347,7 @@ def run_closed_loop_test(config: ClosedLoopTestConfig | None = None) -> ClosedLo
                 estimated_state=estimated_state.data.copy(),
                 goal_rotation_state=goal_rotation_state.data.copy(),
                 control=total_control.torque.copy(),
+                estimated_disturbance_torque=estimated_disturbance_torque.copy(),
                 guidance_mode_value=int(mode) if mode is not None else -1,
                 guidance_mode_name=mode.name if mode is not None else "UNKNOWN",
                 is_complete=bool(is_complete),

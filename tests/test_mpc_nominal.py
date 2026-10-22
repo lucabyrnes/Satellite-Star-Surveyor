@@ -171,3 +171,83 @@ def test_nominal_mpc_accepts_reference_trajectory(
     assert success is True
     assert u_opt.shape == (2, 3)
     assert x_opt.data.shape == (3, 7)
+
+
+def test_nominal_mpc_compensates_control_reference_for_disturbance(
+    error_dynamics_provider: ErrorDynamicsProvider,
+    x0: RotationState,
+    x_goal: RotationState,
+    Q: np.ndarray,
+    R: np.ndarray,
+):
+    mpc = NominalMPC(
+        horizon=2,
+        error_dynamics_provider=error_dynamics_provider,
+        Q=Q,
+        R=R,
+        u_min=-0.25 * np.ones(3),
+        u_max=0.25 * np.ones(3),
+    )
+    disturbance = np.array([0.03, -0.02, 0.01])
+
+    _, u_cost = mpc._build_ref_trajectory(
+        x0,
+        x_goal=x_goal,
+        disturbance_torque=disturbance,
+    )
+
+    np.testing.assert_allclose(u_cost, np.tile(-disturbance, (2, 1)))
+
+
+def test_nominal_mpc_cancels_feasible_disturbance_at_equilibrium(
+    error_dynamics_provider: ErrorDynamicsProvider,
+    Q: np.ndarray,
+    R: np.ndarray,
+):
+    equilibrium = RotationState.zeros()
+    disturbance = np.array([0.03, -0.02, 0.01])
+    mpc = NominalMPC(
+        horizon=3,
+        error_dynamics_provider=error_dynamics_provider,
+        Q=Q,
+        R=R,
+        u_min=-0.25 * np.ones(3),
+        u_max=0.25 * np.ones(3),
+    )
+
+    control = mpc.get_first_control(
+        equilibrium,
+        x_goal=equilibrium,
+        disturbance_torque=disturbance,
+        current_epoch_utc=datetime(2026, 1, 1, tzinfo=timezone.utc),
+    )
+
+    np.testing.assert_allclose(control, -disturbance, atol=1e-9)
+
+
+def test_nominal_mpc_compensates_feedforward_reference_and_clips_to_bounds(
+    error_dynamics_provider: ErrorDynamicsProvider,
+    x0: RotationState,
+    Q: np.ndarray,
+    R: np.ndarray,
+):
+    mpc = NominalMPC(
+        horizon=2,
+        error_dynamics_provider=error_dynamics_provider,
+        Q=Q,
+        R=R,
+        u_min=-0.1 * np.ones(3),
+        u_max=0.1 * np.ones(3),
+    )
+    x_ref = RotationState.batch_zeros(3)
+    x_ref.data[:] = np.tile(x0.data, (3, 1))
+    u_ref = np.tile(np.array([0.08, 0.0, -0.08]), (2, 1))
+
+    _, u_cost = mpc._build_ref_trajectory(
+        x0,
+        x_ref=x_ref,
+        u_ref=u_ref,
+        disturbance_torque=np.array([-0.05, 0.02, 0.05]),
+    )
+
+    np.testing.assert_allclose(u_cost, np.tile([0.1, -0.02, -0.1], (2, 1)))

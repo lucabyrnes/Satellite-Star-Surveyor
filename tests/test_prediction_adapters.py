@@ -124,6 +124,7 @@ class _CountingPredictionAdapter(SpacecraftErrorDynamicsProvider):
         self.state_from_error_calls = 0
         self.state_from_error_batch_calls = 0
         self.affine_step_calls = 0
+        self.affine_step_torques = []
 
     def state_error(self, state, state_ref):
         self.state_error_calls += 1
@@ -143,6 +144,7 @@ class _CountingPredictionAdapter(SpacecraftErrorDynamicsProvider):
 
     def affine_error_dynamics_step(self, x_nom_k, x_nom_kp1, u_nom_k):
         self.affine_step_calls += 1
+        self.affine_step_torques.append(u_nom_k.copy())
         return super().affine_error_dynamics_step(x_nom_k, x_nom_kp1, u_nom_k)
 
 
@@ -167,3 +169,31 @@ def test_nominal_mpc_uses_injected_prediction_model(dynamics, sun_model, sun_bc_
     assert adapter.state_from_error_batch_calls > 0
     assert adapter.state_from_error_calls == 0
     assert adapter.affine_step_calls == mpc.horizon
+
+
+@pytest.mark.unit
+def test_nominal_mpc_passes_compensated_total_torque_to_prediction_model(
+    dynamics, sun_model, sun_bc_margin_rad, ref_state, Q, R
+):
+    adapter = _CountingPredictionAdapter(dynamics, sun_model, sun_bc_margin_rad)
+    mpc = NominalMPC(
+        horizon=2,
+        error_dynamics_provider=adapter,
+        Q=Q,
+        R=R,
+        u_min=-10.0 * np.ones(3),
+        u_max=10.0 * np.ones(3),
+    )
+    disturbance = np.array([0.2, -0.1, 0.05])
+
+    _, _, success = mpc._solve(
+        ref_state,
+        x_goal=ref_state,
+        disturbance_torque=disturbance,
+        current_epoch_utc=datetime(2026, 1, 1, tzinfo=timezone.utc),
+    )
+
+    assert success
+    assert len(adapter.affine_step_torques) == mpc.horizon
+    for total_torque in adapter.affine_step_torques:
+        np.testing.assert_allclose(total_torque, np.zeros(3), atol=1e-12)

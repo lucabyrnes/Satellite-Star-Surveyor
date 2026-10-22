@@ -60,7 +60,7 @@ class ErrorDynamicsProvider(Protocol):
         x_nom_kp1: RotationState,
         u_nom_k: FloatArray,
     ) -> AffineErrorDynamicsStep:
-        """Return one-step affine error dynamics used by MPC constraints."""
+        """Return affine dynamics about the nominal total modeled torque."""
         ...
 
     def affine_error_theta_bc(

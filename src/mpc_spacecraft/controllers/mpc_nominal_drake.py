@@ -10,7 +10,7 @@ from .error_dynamics_providers import AffineErrorDynamicsStep, ErrorDynamicsProv
 from mpc_spacecraft.guidance.sun_tracker import TimeLike
 from mpc_spacecraft.utilities.array_view_generic import BatchArrayView
 from mpc_spacecraft.utilities.utils import (
-    FloatArray, RotationState, RotationErrorState
+    FloatArray, RotationState, RotationErrorState, as_vec3
 )
 
 IDX_STATE_QUAT = RotationState.slice_of("quat")
@@ -121,7 +121,8 @@ class NominalMPC:
         x0: RotationState,
         x_goal: RotationState | None = None,
         x_ref: BatchArrayView[RotationState] | None = None,
-        u_ref: FloatArray | None = None,
+        *,
+        u_cost_traj: FloatArray,
     ) -> tuple[BatchArrayView[RotationState], FloatArray]:
         """
         Build an initial *nominal* guess for (state, control) along the horizon.
@@ -149,9 +150,9 @@ class NominalMPC:
             else:
                 raise ValueError("Need to provide either trajectory or terminal goal")
 
-            # Shift previous solution one step and append terminal/zero
+            # Shift the previous solution and append the current equilibrium input.
             initial_u = np.concatenate(
-                [self.warm_start_u[1:], np.zeros((1, self.control_dim))], axis=0
+                [self.warm_start_u[1:], u_cost_traj[-1:]], axis=0
             )
 
             initial_x.data[:-1] = self.warm_start_x[1:].data
@@ -160,10 +161,7 @@ class NominalMPC:
         # 2) Full reference provided → just use it as nominal
         elif x_ref is not None:
             initial_x = x_ref.copy()
-            if u_ref is not None:
-                initial_u = u_ref
-            else:
-                initial_u = np.zeros((self.horizon, self.control_dim))
+            initial_u = u_cost_traj.copy()
 
         # 3) Only terminal goal given → interpolate between x0 and x_goal
         elif x_goal is not None:
@@ -185,7 +183,7 @@ class NominalMPC:
             initial_x.quat[:] = x_q_guess
             initial_x.omega[:] = x_omega_guess
 
-            initial_u = np.zeros((self.horizon, self.control_dim))
+            initial_u = u_cost_traj.copy()
 
         return initial_x, initial_u
 
@@ -198,6 +196,7 @@ class NominalMPC:
         x_goal: RotationState | None = None,
         x_ref: BatchArrayView[RotationState] | None = None,
         u_ref: FloatArray | None = None,
+        disturbance_torque: FloatArray | None = None,
     ) -> tuple[BatchArrayView[RotationState], FloatArray]:
         """
         Build the *cost reference* trajectory (x_cost_traj, u_cost_traj).
@@ -216,22 +215,36 @@ class NominalMPC:
         if x_goal is None and x_ref is None:
             raise ValueError("Need to provide either trajectory or terminal goal")
 
+        disturbance = self._validated_disturbance_torque(disturbance_torque)
+
         # Tracking a given reference trajectory
         if x_ref is not None:
             x_cost_traj = x_ref
             if u_ref is not None:
-                u_cost_traj = u_ref
+                u_cost_traj = np.asarray(u_ref, dtype=np.float64) - disturbance
             else:
-                u_cost_traj = np.zeros((self.horizon, self.control_dim))
+                u_cost_traj = np.tile(-disturbance, (self.horizon, 1))
 
         # Only terminal goal: cost reference is the constant goal state
         else:
             assert x_goal is not None
             x_cost_traj = RotationState.batch_zeros(self.horizon + 1)
             x_cost_traj.data = np.tile(x_goal.data, (self.horizon + 1, 1))
-            u_cost_traj = np.zeros((self.horizon, self.control_dim))
+            u_cost_traj = np.tile(-disturbance, (self.horizon, 1))
+
+        if self.u_min is not None:
+            u_cost_traj = np.maximum(u_cost_traj, self.u_min)
+        if self.u_max is not None:
+            u_cost_traj = np.minimum(u_cost_traj, self.u_max)
 
         return x_cost_traj, u_cost_traj
+
+    def _validated_disturbance_torque(
+        self, disturbance_torque: FloatArray | None
+    ) -> FloatArray:
+        if disturbance_torque is None:
+            return np.zeros(self.control_dim, dtype=np.float64)
+        return as_vec3(disturbance_torque).copy()
 
     # -------------------------------------------------------------------------
     # Main solve method
@@ -243,6 +256,7 @@ class NominalMPC:
         x_ref: BatchArrayView[RotationState] | None = None,
         u_ref: FloatArray | None = None,
         *,
+        disturbance_torque: FloatArray | None = None,
         current_epoch_utc: TimeLike,
     ) -> tuple[FloatArray, BatchArrayView[RotationState], bool]:
         """
@@ -264,15 +278,23 @@ class NominalMPC:
             raise ValueError("Need to provide either trajectory or terminal goal")
 
         n_err = 6
+        disturbance = self._validated_disturbance_torque(disturbance_torque)
 
         # 1) Cost reference
         x_cost_traj, u_cost_traj = self._build_ref_trajectory(
-            x0=x0, x_goal=x_goal, x_ref=x_ref, u_ref=u_ref
+            x0=x0,
+            x_goal=x_goal,
+            x_ref=x_ref,
+            u_ref=u_ref,
+            disturbance_torque=disturbance,
         )
 
         # 2) Nominal trajectory for linearization and warm-start
         x_nom_traj, u_nom_traj = self._find_initial_guesses(
-            x0=x0, x_goal=x_goal, x_ref=x_ref, u_ref=u_ref
+            x0=x0,
+            x_goal=x_goal,
+            x_ref=x_ref,
+            u_cost_traj=u_cost_traj,
         )
 
         # For tracking problems (explicit x_ref) keep cost reference fixed
@@ -307,7 +329,7 @@ class NominalMPC:
                 step = self.err_dynamics_provider.affine_error_dynamics_step(
                     x_nom_k=x_nom_traj[k],
                     x_nom_kp1=x_nom_traj[k + 1],
-                    u_nom_k=u_nom_traj[k],
+                    u_nom_k=u_nom_traj[k] + disturbance,
                 )
 
                 _add_affine_dynamics_constraint(
@@ -453,6 +475,7 @@ class NominalMPC:
         u_ref: FloatArray | None = None,
         x_goal: RotationState | None = None,
         *,
+        disturbance_torque: FloatArray | None = None,
         current_epoch_utc: TimeLike,
     ) -> FloatArray:
         """
@@ -476,6 +499,7 @@ class NominalMPC:
             x_goal=x_goal,
             x_ref=x_ref,
             u_ref=u_ref,
+            disturbance_torque=disturbance_torque,
             current_epoch_utc=current_epoch_utc,
         )
 

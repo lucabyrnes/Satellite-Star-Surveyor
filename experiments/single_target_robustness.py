@@ -36,15 +36,24 @@ class RobustnessScenario:
     inertia_factors: tuple[float, float, float]
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--max-duration", type=float, default=300.0)
     parser.add_argument("--sim-dt", type=float, default=0.01)
     parser.add_argument("--mpc-dt", type=float, default=5.0)
+    parser.add_argument(
+        "--disturbance-rejection",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help=(
+            "enable the constant-torque observer and offset-free MPC "
+            "(default: disabled)"
+        ),
+    )
     parser.add_argument("--initial-attitude-deg", type=float, default=30.0)
     parser.add_argument("--initial-rate-deg-s", type=float, default=0.1)
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
 def main() -> None:
@@ -82,8 +91,17 @@ def main() -> None:
             base_config.spacecraft,
             inertia=scenario.truth_inertia.copy(),
         )
+        observer_limits = np.maximum(
+            np.abs(spacecraft.u_min),
+            np.abs(spacecraft.u_max),
+        )
         # Keep the controller's prediction inertia nominal in every case.
-        mpc = replace(base_config.mpc, model_inertia=nominal_inertia.copy())
+        mpc = replace(
+            base_config.mpc,
+            model_inertia=nominal_inertia.copy(),
+            enable_disturbance_rejection=args.disturbance_rejection,
+            disturbance_observer_max_abs_torque=observer_limits,
+        )
         scenario_base = replace(
             base_config,
             environment=scenario.environment,
@@ -126,6 +144,11 @@ def main() -> None:
             "mekf_enabled": True,
             "mpc_model_inertia": nominal_inertia.tolist(),
             "disturbances_modeled_by_mpc": False,
+            "disturbance_rejection_enabled": args.disturbance_rejection,
+            "disturbance_observer_max_abs_torque_nm": np.maximum(
+                np.abs(base_config.spacecraft.u_min),
+                np.abs(base_config.spacecraft.u_max),
+            ).tolist(),
         },
         "scenarios": [
             {

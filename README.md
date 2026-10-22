@@ -27,6 +27,7 @@ The system is designed around a closed-loop workflow:
   * Includes warm-starting and SQP-style repeated linearized solves for goal-only control.
   * Uses time-varying linearized dynamics constraints across the prediction horizon.
   * Enforces actuator limits, attitude constraints, and Sun keepout constraints.
+  * Supports offset-free regulation using an estimated constant disturbance torque.
   * Solves a constrained optimal control problem directly on a nonlinear spacecraft attitude system.
 
 * **Multiplicative Extended Kalman Filter**
@@ -122,6 +123,13 @@ The controller supports:
 * Sun keepout constraints enforced throughout the prediction horizon.
 
 At each control update, the controller solves for a sequence of future torque commands and applies only the first command.
+
+An optional constant-torque observer estimates slowly varying, body-frame
+disturbances from angular-rate model residuals. When enabled, the estimate is
+included in the prediction dynamics and subtracted from the control reference,
+allowing the MPC to hold a target without requiring a steady pointing offset.
+The estimate is filtered and bounded, and disturbances beyond actuator authority
+cannot be fully rejected.
 
 ### MEKF State Estimation
 
@@ -317,6 +325,22 @@ config = ClosedLoopTestConfig(
 result = run_closed_loop_test(config)
 ```
 
+Disturbance rejection is opt-in and can be configured through the MPC settings:
+
+```python
+from dataclasses import replace
+
+config = ClosedLoopTestConfig.defaults()
+config = replace(
+    config,
+    mpc=replace(
+        config.mpc,
+        enable_disturbance_rejection=True,
+        disturbance_observer_time_constant_s=300.0,
+    ),
+)
+```
+
 ## Target Format
 
 The planner expects a pandas DataFrame with the following columns:
@@ -364,11 +388,18 @@ Run the MEKF-in-the-loop initial-condition convergence sweeps with:
 python experiments/single_target_convergence.py
 ```
 
+Add `--disturbance-rejection` to run the convergence sweeps with the
+constant-torque observer and offset-free MPC. Use
+`--no-disturbance-rejection` to explicitly select the nominal controller.
+
 Run the nominal, disturbance, and moment-of-inertia mismatch comparison with:
 
 ```bash
 python experiments/single_target_robustness.py
 ```
+
+The robustness runner also accepts `--disturbance-rejection` and
+`--no-disturbance-rejection`.
 
 Both experiments use a `0.01 s` simulation timestep and a `2.0 s` MPC update
 period, stop after the target has accumulated 30 seconds of observation or

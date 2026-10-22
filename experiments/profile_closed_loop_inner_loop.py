@@ -278,6 +278,7 @@ def _run_profile_once(args: argparse.Namespace, *, run_index: int) -> tuple[Prof
                         estimated_state=estimated_state.data.copy(),
                         goal_rotation_state=goal_rotation_state.data.copy(),
                         control=total_control.torque.copy(),
+                        estimated_disturbance_torque=np.zeros(3, dtype=np.float64),
                         guidance_mode_value=int(mode) if mode is not None else -1,
                         guidance_mode_name=mode.name if mode is not None else "UNKNOWN",
                         is_complete=bool(is_complete),
