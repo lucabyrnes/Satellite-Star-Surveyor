@@ -6,7 +6,7 @@ import numpy as np
 import quaternion as qu
 from pydrake.all import MathematicalProgram, OsqpSolver  
 
-from .error_dynamics_providers import ErrorDynamicsProvider
+from .error_dynamics_providers import AffineErrorDynamicsStep, ErrorDynamicsProvider
 from mpc_spacecraft.guidance.sun_tracker import TimeLike
 from mpc_spacecraft.utilities.array_view_generic import BatchArrayView
 from mpc_spacecraft.utilities.utils import (
@@ -18,6 +18,42 @@ IDX_STATE_OMEGA = RotationState.slice_of("omega")
 
 IDX_ROTERR_THETA = RotationErrorState.slice_of("error_angle")
 IDX_ROTERR_OMEGA = RotationErrorState.slice_of("omega")
+
+
+def _add_affine_dynamics_constraint(
+    prog: MathematicalProgram,
+    dx_kp1: Any,
+    dx_k: Any,
+    du_k: Any,
+    step: AffineErrorDynamicsStep,
+) -> None:
+    """Add dx[k+1] = A dx[k] + B du[k] + c without symbolic NumPy math."""
+    variables = np.concatenate((dx_kp1, dx_k, du_k))
+    coefficients = np.hstack((np.eye(step.A.shape[0]), -step.A, -step.B))
+    prog.AddLinearEqualityConstraint(coefficients, step.c, variables)
+
+
+def _add_attitude_boundary_constraint(
+    prog: MathematicalProgram,
+    theta_k: Any,
+    slack_k: Any,
+    alpha_k: FloatArray,
+    b_k: FloatArray,
+) -> None:
+    """Add 2 alphaᵀ theta - slack <= b without symbolic NumPy math."""
+    variables = np.concatenate((theta_k, np.asarray([slack_k], dtype=object)))
+    coefficients = np.concatenate((2.0 * alpha_k, np.array([-1.0])))
+    prog.AddLinearConstraint(coefficients, -np.inf, float(b_k), variables)
+
+
+def _add_biased_quadratic_cost(
+    prog: MathematicalProgram,
+    variables: Any,
+    bias: FloatArray,
+    weight: FloatArray,
+) -> None:
+    """Add (variables + bias)ᵀ weight (variables + bias)."""
+    prog.AddQuadraticErrorCost(weight, -bias, variables)
 
 
 class NominalMPC:
@@ -274,9 +310,12 @@ class NominalMPC:
                     u_nom_k=u_nom_traj[k],
                 )
 
-                prog.AddLinearEqualityConstraint(
-                    dx[k + 1] - step.A @ dx[k] - step.B @ du[k] - step.c,
-                    cast(Any, np.zeros(n_err)),
+                _add_affine_dynamics_constraint(
+                    prog,
+                    dx[k + 1],
+                    dx[k],
+                    du[k],
+                    step,
                 )
 
             # 5) Control constraints (on absolute u = u_norm_traj + du)
@@ -304,8 +343,12 @@ class NominalMPC:
                 alpha_k, b_k = self.err_dynamics_provider.affine_error_theta_bc(
                     x_nom_traj[k], current_epoch_utc
                 )
-                prog.AddLinearConstraint(
-                    2.0 * alpha_k.dot(theta_k) - theta_slack[k] <= b_k
+                _add_attitude_boundary_constraint(
+                    prog,
+                    theta_k,
+                    theta_slack[k],
+                    alpha_k,
+                    b_k,
                 )
                 prog.AddQuadraticCost(self.w_slack * theta_slack[k] ** 2)
 
@@ -313,15 +356,25 @@ class NominalMPC:
             #    - stage costs: dx(k)^T Q dx(k) + du(k)^T R du(k)
             #    - terminal cost: dx(N)^T Q_terminal dx(N)
             for k in range(self.horizon):
-                x_err = dx[k] + x_bias_k[k].data
-                u_err = du[k] + u_bias_k[k]
+                _add_biased_quadratic_cost(
+                    prog,
+                    dx[k],
+                    x_bias_k[k].data,
+                    self.Q,
+                )
+                _add_biased_quadratic_cost(
+                    prog,
+                    du[k],
+                    u_bias_k[k],
+                    self.R,
+                )
 
-                prog.AddQuadraticCost(x_err @ self.Q @ x_err, is_convex=True)
-                prog.AddQuadraticCost(u_err @ self.R @ u_err, is_convex=True)
-
-            x_term_err = dx[self.horizon] + x_bias_k[self.horizon].data
-            prog.AddQuadraticCost(
-                x_term_err @ self.Q_terminal @ x_term_err, is_convex=True
+            # Terminal Cost
+            _add_biased_quadratic_cost(
+                prog,
+                dx[self.horizon],
+                x_bias_k[self.horizon].data,
+                self.Q_terminal,
             )
 
             #    Initial guesses in error coordinates
@@ -431,4 +484,3 @@ class NominalMPC:
             return np.zeros(self.control_dim)
 
         return u_opt[0]
-

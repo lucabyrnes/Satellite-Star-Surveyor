@@ -1,6 +1,12 @@
 from mpc_spacecraft.estimation.MEKF import MEKF
 from mpc_spacecraft.simulation.state_measurement_gen import StateMeasurementGenerator
-from mpc_spacecraft.estimation.sensor_models import GNSSConfig, GyroConfig, IMUConfig, StarTrackerConfig, make_mekf_initial_covariance
+from mpc_spacecraft.estimation.sensor_models import (
+    GNSSConfig,
+    GyroConfig,
+    IMUConfig,
+    StarTrackerConfig,
+    make_mekf_initial_covariance,
+)
 from mpc_spacecraft.utilities.utils import FullSimState, SensorRigidBodyState
 
 import quaternion as qu
@@ -8,26 +14,30 @@ import quaternion as qu
 
 class StateEstimationSimHandler:
 
-    def __init__(self,
+    def __init__(
+        self,
         intial_sensor_state: SensorRigidBodyState,
         gnss_measurement_period: float,
         star_tracker_measurement_period: float,
-        rng_seed: int
-        ):
+        rng_seed: int,
+        enable_measurement_noise: bool = True,
+    ):
 
-        self.mekf = MEKF(intial_sensor_state, 
-            IMUConfig(), 
-            GyroConfig(), 
-            GNSSConfig(), 
+        self.mekf = MEKF(
+            intial_sensor_state,
+            IMUConfig(),
+            GyroConfig(),
+            GNSSConfig(),
             StarTrackerConfig(),
             start_P=make_mekf_initial_covariance(),
         )
         self.measurementGen = StateMeasurementGenerator(
-            IMUConfig(), 
-            GyroConfig(), 
-            GNSSConfig(), 
-            StarTrackerConfig(), 
-            rng_seed
+            IMUConfig(),
+            GyroConfig(),
+            GNSSConfig(),
+            StarTrackerConfig(),
+            rng_seed,
+            enable_noise=enable_measurement_noise,
         )
 
         self._gnss_period = gnss_measurement_period
@@ -93,4 +103,6 @@ class StateEstimationSimHandler:
         if past_measurement_time is None:
             return True
 
-        return current_time - past_measurement_time >= measurement_period
+        elapsed = current_time - past_measurement_time
+        tolerance = 1e-12 * max(1.0, abs(current_time), abs(past_measurement_time))
+        return elapsed >= measurement_period - tolerance

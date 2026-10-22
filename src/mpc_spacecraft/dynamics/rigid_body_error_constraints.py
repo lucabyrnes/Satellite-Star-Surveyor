@@ -73,7 +73,7 @@ class RigidBodyErrorConstraintBuilder:
         """Build affine error dynamics step: dx(k+1) = A dx(k) + B du(k) + c."""
         omega = x_nom_k.omega
         skew_w = skew(omega)
-        skew_jw = skew(self.inertia_inv @ omega)
+        skew_jw = skew(self.inertia @ omega)
 
         B_omega_c = self.inertia_inv @ (skew_jw - skew_w @ self.inertia)
         D_omega_c = np.block([self.inertia_inv])

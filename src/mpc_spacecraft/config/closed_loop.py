@@ -83,6 +83,7 @@ class ClosedLoopMPCConfig:
         default_factory=lambda: 1.0 * np.eye(3, dtype=np.float64)
     )
     q_terminal: FloatArray | None = None
+    model_inertia: FloatArray | None = None
 
 
 @dataclass(frozen=True)
@@ -91,6 +92,8 @@ class SensorScheduleConfig:
 
     gnss_measurement_period: float = 1.0
     star_tracker_measurement_period: float = 0.1
+    enable_measurement_noise: bool = True
+    enable_bias_random_walk: bool = True
 
 
 @dataclass(frozen=True)
@@ -150,6 +153,7 @@ class ClosedLoopTestConfig:
     targets: TargetConfig = field(default_factory=TargetConfig)
     rng_seed: int = 2
     show_progress: bool = True
+    stop_when_complete: bool = False
 
     @classmethod
     def defaults(cls, **overrides: Any) -> "ClosedLoopTestConfig":

@@ -75,7 +75,6 @@ Satellite-Star-Surveyor/
 ├── notebooks/             # Jupyter notebooks
 ├── Notes/                 # Project notes
 ├── pyproject.toml
-├── requirements.txt
 └── README.md
 ```
 
@@ -170,7 +169,7 @@ The main reusable API is built around `run_closed_loop_test`, which returns a `C
 
 ## Installation
 
-This project requires Python 3.12 or newer.
+This project supports Python 3.12 through 3.14.
 
 Clone the repository:
 
@@ -186,17 +185,23 @@ python3.12 -m venv .venv
 source .venv/bin/activate
 ```
 
-Install the package in editable mode:
+Install the package and its runtime dependencies (including NumPy) in editable
+mode:
 
 ```bash
-pip install -e .
+python -m pip install --upgrade pip
+python -m pip install -e .
 ```
 
-Alternatively, install from `requirements.txt`:
+For development, including tests, visualization, and notebook tooling, install
+the `dev` extra instead:
 
 ```bash
-pip install -r requirements.txt
+python -m pip install -e ".[dev]"
 ```
+
+All Python dependencies are declared in `pyproject.toml`; there is no separate
+requirements file to keep in sync.
 
 ## Major Dependencies
 
@@ -207,10 +212,7 @@ The project uses:
 * `pandas`
 * `numpy-quaternion`
 * `drake`
-* `torch`
 * `matplotlib`
-* `pyvista`
-* `vispy`
 * `ursina`
 * `skyfield`
 * `astropy`
@@ -338,6 +340,41 @@ targets = pd.DataFrame(
     }
 )
 ```
+
+## Timestep Convergence Experiment
+
+Run the isolated dynamics verification first, followed by deterministic
+closed-loop timestep sensitivity:
+
+```bash
+python experiments/timestep_convergence.py --phase all
+```
+
+The default closed-loop experiment lasts 120 seconds and keeps the MPC and
+sensor update periods fixed in physical time. Results, CSV metrics, and plots
+are written to `experiments/results/timestep_convergence/`. Individual phases
+can be selected with `--phase dynamics` or `--phase closed-loop`; use `--help`
+to list timestep and duration overrides.
+
+## Single-Target Performance Experiments
+
+Run the MEKF-in-the-loop initial-condition convergence sweeps with:
+
+```bash
+python experiments/single_target_convergence.py
+```
+
+Run the nominal, disturbance, and moment-of-inertia mismatch comparison with:
+
+```bash
+python experiments/single_target_robustness.py
+```
+
+Both experiments use a `0.01 s` simulation timestep and a `2.0 s` MPC update
+period, stop after the target has accumulated 30 seconds of observation or
+after 300 seconds, and save plots plus CSV/JSON metrics under
+`experiments/results/`. Use each script's `--help` option to override the
+timing, initial-condition sweep, or output directory.
 
 ## Notes
 

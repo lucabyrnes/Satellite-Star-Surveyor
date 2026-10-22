@@ -1,5 +1,5 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling>=1.32.4"]
 build-backend = "hatchling.build"
 
 [project]
@@ -7,36 +7,46 @@ name = "mpc-spacecraft"
 version = "0.1.0"
 description = "Model Predictive Control for Spacecraft Attitude"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.12,<3.15"
 dependencies = [
-    "numpy>=1.21.0",
-    "scipy>=1.7.0",
-    "ursina",
-    "skyfield",
-    "numpy-quaternion>=2023.0.0",
-    "drake>=1.0.0",
-    "torch>=2.0.0",
-    "torchvision>=0.15.0",
-    "matplotlib>=3.5.0",
-    "pyvista>=0.40.0",
-    "vispy>=0.12.0",
-    "pytest>=7.0.0",
-    "pytest-cov>=3.0.0",
-    "black>=22.0.0",
-    "flake8>=4.0.0",
-    "mypy>=0.950",
-    "jupyter>=1.0.0",
-    "ipykernel>=6.0.0",
-    "notebook>=6.4.0",
-    "tqdm>=4.60.0",
-    "pyyaml>=6.0",
-    "astropy>=6.0.0",
+    "numpy>=2.5.4",
+    "scipy>=1.18.1",
+    "pandas>=3.0.6",
+    "numpy-quaternion>=2024.0.13",
+    "drake>=1.58.0",
+    "astropy>=8.0.2",
+    "tqdm>=4.70.1",
 ]
 
 [project.optional-dependencies]
+visualization = [
+    "matplotlib>=3.11.2",
+    "ursina>=8.3.0",
+    "skyfield>=1.55",
+]
+notebook = [
+    "jupyter>=1.1.1",
+    "ipykernel>=7.4.0",
+    "notebook>=7.6.3",
+]
+test = [
+    "pytest>=9.1.1",
+    "pytest-cov>=7.1.0",
+]
 dev = [
-    "pre-commit",
-    "pyrefly",
+    "black>=26.10.1",
+    "flake8>=7.4.1",
+    "mypy>=2.4.0",
+    "pre-commit>=4.7.0",
+    "pyrefly>=1.4.0",
+    "pytest>=9.1.1",
+    "pytest-cov>=7.1.0",
+    "matplotlib>=3.11.2",
+    "ursina>=8.3.0",
+    "skyfield>=1.55",
+    "jupyter>=1.1.1",
+    "ipykernel>=7.4.0",
+    "notebook>=7.6.3",
 ]
 
 [tool.hatch.build.targets.wheel.shared-data]

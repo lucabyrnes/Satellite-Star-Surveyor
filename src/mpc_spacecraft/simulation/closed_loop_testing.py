@@ -72,6 +72,7 @@ class ClosedLoopTestResult:
     config: ClosedLoopTestConfig
     records: list[ClosedLoopLogRecord] = field(default_factory=list)
     final_state: FullSimState | None = None
+    final_time: float | None = None
 
     def append(self, record: ClosedLoopLogRecord) -> None:
         """Append one log record."""
@@ -200,9 +201,21 @@ def run_closed_loop_test(config: ClosedLoopTestConfig | None = None) -> ClosedLo
         config.rng_seed,
         enable_gravity=environment.enable_gravity,
     )
-    dynamics = SpacecraftDynamics(spacecraft.inertia, disturbance_model, spacecraft.mass)
+    truth_dynamics = SpacecraftDynamics(
+        spacecraft.inertia, disturbance_model, spacecraft.mass
+    )
+    prediction_inertia = (
+        spacecraft.inertia
+        if mpc_config.model_inertia is None
+        else mpc_config.model_inertia
+    )
+    prediction_dynamics = SpacecraftDynamics(
+        prediction_inertia,
+        DisturbanceModel(enable_gravity=False),
+        spacecraft.mass,
+    )
     error_dynamics_provider = SpacecraftErrorDynamicsProvider(
-        dynamics,
+        prediction_dynamics,
         sun_model,
         np.deg2rad(environment.sun_keep_out_deg),
         timing.mpc_dt,
@@ -221,8 +234,14 @@ def run_closed_loop_test(config: ClosedLoopTestConfig | None = None) -> ClosedLo
         sensors.gnss_measurement_period,
         sensors.star_tracker_measurement_period,
         config.rng_seed,
+        enable_measurement_noise=sensors.enable_measurement_noise,
     )
-    sensor_bias_updater = SensorBiasUpdater(IMUConfig(), GyroConfig(), config.rng_seed)
+    sensor_bias_updater = SensorBiasUpdater(
+        IMUConfig(),
+        GyroConfig(),
+        config.rng_seed,
+        enabled=sensors.enable_bias_random_walk,
+    )
 
     result = ClosedLoopTestResult(config=config)
     total_control = RigidBodyControl.zeros()
@@ -251,8 +270,14 @@ def run_closed_loop_test(config: ClosedLoopTestConfig | None = None) -> ClosedLo
             estimator_used_star_tracker = False
             estimator_used_gnss = False
 
+        mpc_elapsed = (
+            0.0
+            if previous_mpc_guidance_update is None
+            else clock.current_time - previous_mpc_guidance_update
+        )
+        timing_tolerance = 1e-12 * max(1.0, abs(clock.current_time))
         mpc_update = previous_mpc_guidance_update is None or (
-            clock.current_time - previous_mpc_guidance_update >= timing.mpc_dt
+            mpc_elapsed >= timing.mpc_dt - timing_tolerance
         )
         if mpc_update:
             guidance_delta_time = (
@@ -311,8 +336,11 @@ def run_closed_loop_test(config: ClosedLoopTestConfig | None = None) -> ClosedLo
             )
         )
 
+        if config.stop_when_complete and is_complete:
+            break
+
         time_step = clock.advance(1)
-        sim_state.rigid_body[:] = dynamics.discretize_dynamics_rk4_full_state(
+        sim_state.rigid_body[:] = truth_dynamics.discretize_dynamics_rk4_full_state(
             sim_state.rigid_body,
             total_control,
             time_step.t0,
@@ -321,6 +349,7 @@ def run_closed_loop_test(config: ClosedLoopTestConfig | None = None) -> ClosedLo
         sim_state = sensor_bias_updater.tick(sim_state, time_step.dt)
 
     result.final_state = sim_state.copy()
+    result.final_time = clock.current_time
     return result
 
 

@@ -14,6 +14,26 @@ from .mission_results import (
     save_mission_artifact,
 )
 from .stability import analyze_closed_loop_stability, compute_lyapunov_function
+from .single_target import (
+    SingleTargetCaseResult,
+    compute_single_target_metrics,
+    make_single_target_config,
+    make_single_target_table,
+    make_target_relative_initial_state,
+    perturb_inertia,
+    run_single_target_case,
+    summarize_disturbance_torque,
+    sustained_entry_time,
+)
+from .timestep_convergence import (
+    ClosedLoopConvergenceResult,
+    DynamicsConvergenceResult,
+    estimate_observed_order,
+    quaternion_angular_distance_rad,
+    run_closed_loop_convergence,
+    run_dynamics_convergence,
+    validate_step_grid,
+)
 
 __all__ = [
     "compute_tracking_error",
@@ -31,4 +51,20 @@ __all__ = [
     "save_mission_artifact",
     "analyze_closed_loop_stability",
     "compute_lyapunov_function",
+    "SingleTargetCaseResult",
+    "compute_single_target_metrics",
+    "make_single_target_config",
+    "make_single_target_table",
+    "make_target_relative_initial_state",
+    "perturb_inertia",
+    "run_single_target_case",
+    "summarize_disturbance_torque",
+    "sustained_entry_time",
+    "ClosedLoopConvergenceResult",
+    "DynamicsConvergenceResult",
+    "estimate_observed_order",
+    "quaternion_angular_distance_rad",
+    "run_closed_loop_convergence",
+    "run_dynamics_convergence",
+    "validate_step_grid",
 ]

@@ -73,9 +73,15 @@ def test_tick_uses_all_measurements_on_first_call_and_updates_timestamps() -> No
     handler, measurement_gen, mekf = make_handler()
     state = make_full_state()
 
-    result = handler.tick(current_time=1.0, past_dt=0.25, state=state)
+    estimated_state, used_star_tracker, used_gnss = handler.tick(
+        current_time=1.0,
+        past_dt=0.25,
+        state=state,
+    )
 
-    assert isinstance(result, SensorRigidBodyState)
+    assert isinstance(estimated_state, SensorRigidBodyState)
+    assert used_star_tracker is True
+    assert used_gnss is True
     assert measurement_gen.calls == [state]
 
     call = mekf.calls[-1]

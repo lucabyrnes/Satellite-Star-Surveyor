@@ -102,6 +102,7 @@ def test_nominal_mpc_solve_uses_current_api(
     np.testing.assert_allclose(x_opt[0].omega, x0.omega, atol=1e-12)
 
 
+@pytest.mark.filterwarnings("error:invalid value encountered:RuntimeWarning")
 def test_nominal_mpc_get_first_control_accepts_current_epoch(
     error_dynamics_provider: ErrorDynamicsProvider,
     x0: RotationState,

@@ -43,12 +43,12 @@ ENV VIRTUAL_ENV=/opt/venv
 RUN /usr/local/bin/uv venv ${VIRTUAL_ENV}
 ENV PATH="${VIRTUAL_ENV}/bin:${PATH}"
 
-COPY requirements.txt /tmp/requirements.txt
+COPY pyproject.toml README.md ./
+COPY src ./src
 
-# Install Python packages with uv (much faster than pip)
+# Install the project and all development tools from pyproject.toml.
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install -r /tmp/requirements.txt && \
-    rm /tmp/requirements.txt
+    uv pip install --editable ".[dev]"
 
 # Make sure Jupyter kernel is available in notebooks
 RUN python -m ipykernel install --name=mpc_spacecraft --display-name "Python (mpc_spacecraft)"
