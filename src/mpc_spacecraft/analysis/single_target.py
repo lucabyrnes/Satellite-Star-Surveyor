@@ -342,7 +342,7 @@ def summarize_disturbance_torque(
         and amplitude != 0.0
         and frequency != 0.0
     ):
-        phase = float(frequency) * time
+        phase = 2.0 * np.pi * float(frequency) * time
         torque += float(amplitude) * np.column_stack(
             [
                 np.sin(phase),

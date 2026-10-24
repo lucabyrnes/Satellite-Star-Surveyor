@@ -49,6 +49,16 @@ experiment_payload = {
         "mpc_dt": config.timing.mpc_dt,
         "sim_cycles": config.timing.sim_cycles,
         "rng_seed": config.rng_seed,
+        "sun_keepout_deg": config.environment.sun_keep_out_deg,
+        "earth_margin_deg": config.environment.earth_margin_deg,
+        "torque_limit_nm": float(
+            np.max(
+                np.maximum(
+                    np.abs(config.spacecraft.u_min),
+                    np.abs(config.spacecraft.u_max),
+                )
+            )
+        ),
     },
 }
 

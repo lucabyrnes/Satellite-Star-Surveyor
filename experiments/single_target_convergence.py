@@ -6,6 +6,7 @@ import argparse
 from dataclasses import replace
 import json
 from pathlib import Path
+import re
 from typing import Any
 
 import numpy as np
@@ -23,6 +24,11 @@ DEFAULT_OUTPUT_DIR = Path("./experiments/results/single_target_convergence")
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
+    # argparse's default matcher does not recognize negative scientific
+    # notation (for example, -5e-4) as a numeric argument.
+    parser._negative_number_matcher = re.compile(  # type: ignore[attr-defined]
+        r"^-?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$"
+    )
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--max-duration", type=float, default=300.0)
     parser.add_argument("--sim-dt", type=float, default=0.01)
@@ -37,6 +43,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--disturbance-torque-nm",
+        type=float,
+        nargs=3,
+        metavar=("TX", "TY", "TZ"),
+        default=None,
+        help=(
+            "constant body-frame disturbance torque [N·m] as TX TY TZ "
+            "(default: use the configured environment torque)"
+        ),
+    )
+    parser.add_argument(
         "--attitude-offsets-deg",
         type=float,
         nargs="+",
@@ -44,6 +61,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--angular-rates-deg-s",
+        "--angular-rates",
         type=float,
         nargs="+",
         default=[0.0, 0.1, 0.25, 0.5],
@@ -51,11 +69,22 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def make_base_config(*, disturbance_rejection: bool) -> ClosedLoopTestConfig:
+def make_base_config(
+    *,
+    disturbance_rejection: bool,
+    disturbance_torque_nm: list[float] | np.ndarray | None = None,
+) -> ClosedLoopTestConfig:
     """Build the shared sweep configuration from CLI feature toggles."""
     config = ClosedLoopTestConfig.defaults(show_progress=False)
+    environment = config.environment
+    if disturbance_torque_nm is not None:
+        environment = replace(
+            environment,
+            disturbance_bias=np.asarray(disturbance_torque_nm, dtype=np.float64),
+        )
     return replace(
         config,
+        environment=environment,
         mpc=replace(
             config.mpc,
             enable_disturbance_rejection=disturbance_rejection,
@@ -67,7 +96,8 @@ def main() -> None:
     args = parse_args()
     args.output_dir.mkdir(parents=True, exist_ok=True)
     base_config = make_base_config(
-        disturbance_rejection=args.disturbance_rejection
+        disturbance_rejection=args.disturbance_rejection,
+        disturbance_torque_nm=args.disturbance_torque_nm,
     )
 
     attitude_cases: list[SingleTargetCaseResult] = []
@@ -128,6 +158,11 @@ def main() -> None:
             "disturbance_rejection_enabled": (
                 base_config.mpc.enable_disturbance_rejection
             ),
+            "disturbance_torque_nm": (
+                base_config.environment.disturbance_bias.tolist()
+                if base_config.environment.disturbance_bias is not None
+                else None
+            ),
             "attitude_offsets_deg": args.attitude_offsets_deg,
             "angular_rates_deg_s": args.angular_rates_deg_s,
         },
@@ -168,7 +203,7 @@ def _plot_attitude_cases(cases: list[SingleTargetCaseResult], path: Path) -> Non
         error = case.logs["active_target_boresight_angle_deg"].to_numpy(
             dtype=np.float64
         )
-        ax.semilogy(time, np.maximum(error, 1e-6), label=_case_label(case))
+        ax.semilogy(time, np.maximum(error, 1e-6), label=case.label)
     ax.axhline(0.5, color="tab:orange", linestyle="--", label="0.5° settling threshold")
     ax.axhline(
         0.01, color="tab:red", linestyle=":", label="0.01° observation threshold"
@@ -195,7 +230,7 @@ def _plot_rate_cases(cases: list[SingleTargetCaseResult], path: Path) -> None:
             dtype=np.float64
         )
         rate_deg_s = np.rad2deg(np.linalg.norm(omega, axis=1))
-        ax.plot(case.logs["time"], rate_deg_s, label=_case_label(case))
+        ax.plot(case.logs["time"], rate_deg_s, label=case.label)
     ax.axhline(
         0.01,
         color="tab:red",
@@ -210,22 +245,6 @@ def _plot_rate_cases(cases: list[SingleTargetCaseResult], path: Path) -> None:
     fig.tight_layout()
     fig.savefig(path, dpi=220)
     plt.close(fig)
-
-
-def _case_label(case: SingleTargetCaseResult) -> str:
-    settling_time = float(case.metrics["settling_time_s"])
-    settling = (
-        f"settled at {settling_time:.1f}s"
-        if np.isfinite(settling_time)
-        else "not settled"
-    )
-    observed = float(case.metrics["target_observation_time_s"])
-    completion = (
-        "observation complete"
-        if case.metrics["completed_observation"]
-        else f"observation incomplete ({observed:.0f}/30s)"
-    )
-    return f"{case.label} ({settling}; {completion})"
 
 
 def _json_safe(value: Any) -> Any:

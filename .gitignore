@@ -41,14 +41,21 @@ ENV/
 .ipynb_checkpoints
 *.ipynb
 
-# Data and models
-experiments/data/*.npz
-experiments/data/*.pkl
-experiments/models/*.pth
-experiments/models/*.pt
-
-# Results
-experiments/results/*
+# Generated experiment artifacts
+experiments/data/
+experiments/models/
+experiments/results/
+experiments/figures/
+experiments/*.csv
+experiments/*.json
+experiments/*.npy
+experiments/*.npz
+experiments/*.pkl
+experiments/*.png
+experiments/*.jpg
+experiments/*.jpeg
+experiments/*.svg
+experiments/*.pdf
 
 # OS
 .DS_Store

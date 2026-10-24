@@ -14,17 +14,17 @@ import pandas as pd
 from mpc_spacecraft.analysis.single_target import (
     SingleTargetCaseResult,
     make_single_target_config,
-    perturb_inertia,
     run_single_target_case,
     summarize_disturbance_torque,
 )
 from mpc_spacecraft.config import (
     ClosedLoopEnvironmentConfig,
     ClosedLoopTestConfig,
-    SpacecraftPhysicalConfig,
 )
 
 DEFAULT_OUTPUT_DIR = Path("./experiments/results/single_target_robustness")
+REFERENCE_DISTURBANCE_TORQUE_NM = np.array([8.0e-4, -5.0e-4, 3.0e-4], dtype=np.float64)
+INERTIA_MISMATCH_FACTORS = np.array([1.20, 0.85, 1.15], dtype=np.float64)
 
 
 @dataclass(frozen=True)
@@ -39,7 +39,7 @@ class RobustnessScenario:
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
-    parser.add_argument("--max-duration", type=float, default=300.0)
+    parser.add_argument("--max-duration", type=float, default=600.0)
     parser.add_argument("--sim-dt", type=float, default=0.01)
     parser.add_argument("--mpc-dt", type=float, default=5.0)
     parser.add_argument(
@@ -52,7 +52,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument("--initial-attitude-deg", type=float, default=30.0)
-    parser.add_argument("--initial-rate-deg-s", type=float, default=0.1)
+    parser.add_argument("--initial-rate-deg-s", type=float, default=0.0)
     return parser.parse_args(argv)
 
 
@@ -133,7 +133,7 @@ def main() -> None:
     _plot_torque(cases, args.output_dir / "robustness_torque.png")
 
     summary = {
-        "schema_version": "mpc_spacecraft_single_target_robustness_v1",
+        "schema_version": "mpc_spacecraft_single_target_robustness_v2",
         "configuration": {
             "sim_dt_s": args.sim_dt,
             "mpc_dt_s": args.mpc_dt,
@@ -182,26 +182,41 @@ def main() -> None:
 def _build_scenarios(
     base_config: ClosedLoopTestConfig, nominal_inertia: np.ndarray
 ) -> list[RobustnessScenario]:
-    nominal_environment = base_config.environment
+    def constant_torque_environment(scale: float) -> ClosedLoopEnvironmentConfig:
+        return replace(
+            base_config.environment,
+            disturbance_bias=scale * REFERENCE_DISTURBANCE_TORQUE_NM,
+            disturbance_noise_std=None,
+            disturbance_sinusoidal_amplitude=None,
+            disturbance_sinusoidal_frequency=None,
+        )
+
+    ideal_environment = constant_torque_environment(0.0)
+    reference_environment = constant_torque_environment(1.0)
     moderate_environment = replace(
-        nominal_environment,
-        disturbance_bias=np.array([0.01, -0.006, 0.004], dtype=np.float64),
-        disturbance_noise_std=5.0e-4,
-        disturbance_sinusoidal_amplitude=0.005,
+        reference_environment,
+        disturbance_bias=5.0 * REFERENCE_DISTURBANCE_TORQUE_NM,
     )
     severe_environment = replace(
-        nominal_environment,
-        disturbance_bias=np.array([0.04, -0.024, 0.016], dtype=np.float64),
-        disturbance_noise_std=2.0e-3,
-        disturbance_sinusoidal_amplitude=0.02,
+        reference_environment,
+        disturbance_bias=20.0 * REFERENCE_DISTURBANCE_TORQUE_NM,
     )
-    moderate_factors = np.array([1.20, 0.85, 1.15], dtype=np.float64)
-    severe_factors = np.array([1.35, 0.70, 1.25], dtype=np.float64)
+    mismatched_inertia = _scale_inertia_diagonal(
+        nominal_inertia, INERTIA_MISMATCH_FACTORS
+    )
+    mismatch_factors = tuple(float(value) for value in INERTIA_MISMATCH_FACTORS)
     return [
         RobustnessScenario(
-            "nominal",
-            "Nominal",
-            nominal_environment,
+            "ideal_reference",
+            "Ideal reference",
+            ideal_environment,
+            nominal_inertia.copy(),
+            (1.0, 1.0, 1.0),
+        ),
+        RobustnessScenario(
+            "constant_bias_reference",
+            "Constant-bias reference",
+            reference_environment,
             nominal_inertia.copy(),
             (1.0, 1.0, 1.0),
         ),
@@ -220,28 +235,39 @@ def _build_scenarios(
             (1.0, 1.0, 1.0),
         ),
         RobustnessScenario(
-            "moi_mismatch",
-            "MOI mismatch",
-            nominal_environment,
-            perturb_inertia(nominal_inertia, moderate_factors),
-            (
-                float(moderate_factors[0]),
-                float(moderate_factors[1]),
-                float(moderate_factors[2]),
-            ),
+            "inertia_mismatch",
+            "Inertia mismatch",
+            reference_environment,
+            mismatched_inertia.copy(),
+            mismatch_factors,
         ),
         RobustnessScenario(
-            "severe_combined",
-            "Severe disturbance + MOI mismatch",
+            "combined_uncertainty",
+            "Combined uncertainty",
             severe_environment,
-            perturb_inertia(nominal_inertia, severe_factors),
-            (
-                float(severe_factors[0]),
-                float(severe_factors[1]),
-                float(severe_factors[2]),
-            ),
+            mismatched_inertia.copy(),
+            mismatch_factors,
         ),
     ]
+
+
+def _scale_inertia_diagonal(
+    nominal_inertia: np.ndarray, axis_factors: np.ndarray
+) -> np.ndarray:
+    """Scale only the inertia diagonal, retaining nominal cross-axis terms."""
+    inertia = np.asarray(nominal_inertia, dtype=np.float64)
+    factors = np.asarray(axis_factors, dtype=np.float64)
+    if inertia.shape != (3, 3) or factors.shape != (3,):
+        raise ValueError("Expected inertia shape (3, 3) and axis_factors shape (3,).")
+    if np.any(factors <= 0.0):
+        raise ValueError("axis_factors must be positive.")
+
+    modified = inertia.copy()
+    diagonal = np.diag_indices(3)
+    modified[diagonal] = inertia[diagonal] * factors
+    if np.any(np.linalg.eigvalsh(modified) <= 0.0):
+        raise ValueError("Modified inertia must remain positive-definite.")
+    return modified
 
 
 def _disturbance_comparison(
@@ -284,7 +310,7 @@ def _plot_pointing(cases: list[SingleTargetCaseResult], path: Path) -> None:
         ax.semilogy(
             case.logs["time"],
             np.maximum(error, 1e-6),
-            label=_case_label(case),
+            label=case.label,
         )
     ax.axhline(0.5, color="tab:orange", linestyle="--", label="0.5° settling threshold")
     ax.axhline(
@@ -338,22 +364,6 @@ def _plot_torque(cases: list[SingleTargetCaseResult], path: Path) -> None:
     fig.tight_layout()
     fig.savefig(path, dpi=220)
     plt.close(fig)
-
-
-def _case_label(case: SingleTargetCaseResult) -> str:
-    settling_time = float(case.metrics["settling_time_s"])
-    settling = (
-        f"settled at {settling_time:.1f}s"
-        if np.isfinite(settling_time)
-        else "not settled"
-    )
-    observed = float(case.metrics["target_observation_time_s"])
-    completion = (
-        "observation complete"
-        if case.metrics["completed_observation"]
-        else f"observation incomplete ({observed:.0f}/30s)"
-    )
-    return f"{case.label} ({settling}; {completion})"
 
 
 def _json_safe(value: Any) -> Any:

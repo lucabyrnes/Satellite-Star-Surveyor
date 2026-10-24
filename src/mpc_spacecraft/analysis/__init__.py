@@ -13,6 +13,15 @@ from .mission_results import (
     quaternion_angle_error_deg,
     save_mission_artifact,
 )
+from .mekf_verification import (
+    InnovationConsistencyResult,
+    MEKFVerificationConfig,
+    MEKFVerificationResult,
+    average_chi_square_bounds,
+    mekf_error_state,
+    normalized_squared_error,
+    run_mekf_verification,
+)
 from .stability import analyze_closed_loop_stability, compute_lyapunov_function
 from .single_target import (
     SingleTargetCaseResult,
@@ -49,6 +58,13 @@ __all__ = [
     "compute_mission_summary",
     "quaternion_angle_error_deg",
     "save_mission_artifact",
+    "InnovationConsistencyResult",
+    "MEKFVerificationConfig",
+    "MEKFVerificationResult",
+    "average_chi_square_bounds",
+    "mekf_error_state",
+    "normalized_squared_error",
+    "run_mekf_verification",
     "analyze_closed_loop_stability",
     "compute_lyapunov_function",
     "SingleTargetCaseResult",

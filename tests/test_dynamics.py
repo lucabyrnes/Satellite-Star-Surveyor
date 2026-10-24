@@ -5,7 +5,7 @@ import quaternion
 from mpc_spacecraft.controllers.error_state_mapping import ErrorStateMappingService
 from mpc_spacecraft.dynamics.disturbances import DisturbanceModel
 from mpc_spacecraft.dynamics.rigid_body import SpacecraftDynamics
-from mpc_spacecraft.utilities.utils import RotationState, TranslationState
+from mpc_spacecraft.utilities.utils import RigidBodyState, RotationState, TranslationState
 
 
 @pytest.fixture
@@ -26,6 +26,19 @@ def dynamics(inertia, dt):
 @pytest.fixture
 def error_mapping():
     return ErrorStateMappingService()
+
+
+@pytest.mark.unit
+def test_sinusoidal_disturbance_frequency_is_measured_in_hz() -> None:
+    model = DisturbanceModel(
+        sinusoidal_amplitude=2.0,
+        sinusoidal_frequency=0.25,
+        enable_gravity=False,
+    )
+
+    disturbance = model.get_disturbance(1.0, RigidBodyState.zeros())
+
+    assert disturbance.torque[0] == pytest.approx(2.0)
 
 
 @pytest.fixture

@@ -407,6 +407,23 @@ after 300 seconds, and save plots plus CSV/JSON metrics under
 `experiments/results/`. Use each script's `--help` option to override the
 timing, initial-condition sweep, or output directory.
 
+## MEKF Statistical Verification
+
+Run the isolated Monte Carlo estimator verification with:
+
+```bash
+python experiments/mekf_statistical_verification.py --runs 100
+```
+
+The experiment samples initial errors from the MEKF covariance and runs
+independent sensor-noise and bias-random-walk realizations along a known truth
+trajectory. It writes attitude mean/RMSE, average NEES, and star-tracker and
+GNSS average NIS plots plus CSV/JSON summaries under
+`experiments/results/mekf_verification/`. A statistically consistent filter
+should have average NEES near 15, star-tracker NIS near 3, and GNSS NIS near 6;
+the generated plots include chi-squared confidence bounds for the requested
+number of Monte Carlo runs.
+
 ## Notes
 
 This project is a simulation and controls research prototype. It is intended for experimenting with spacecraft attitude dynamics, autonomous star target selection, nonlinear state estimation, and MPC-based control. The visualized bodies are not rendered to scale.

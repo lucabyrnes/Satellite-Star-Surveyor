@@ -23,7 +23,10 @@ from mpc_spacecraft.config import (
 from mpc_spacecraft.simulation import run_closed_loop_test
 from mpc_spacecraft.utilities.utils import BODY_FORWARD_VEC3
 from experiments.single_target_convergence import make_base_config, parse_args
-from experiments.single_target_robustness import parse_args as parse_robustness_args
+from experiments.single_target_robustness import (
+    _build_scenarios,
+    parse_args as parse_robustness_args,
+)
 
 
 @pytest.mark.unit
@@ -89,6 +92,28 @@ def test_disturbance_summary_compares_torque_with_axis_limits() -> None:
 
 
 @pytest.mark.unit
+def test_disturbance_summary_interprets_sinusoidal_frequency_as_hz() -> None:
+    environment = ClosedLoopEnvironmentConfig(
+        disturbance_bias=None,
+        disturbance_noise_std=None,
+        disturbance_sinusoidal_amplitude=2.0,
+        disturbance_sinusoidal_frequency=0.25,
+        enable_gravity=False,
+    )
+
+    summary = summarize_disturbance_torque(
+        environment,
+        duration_s=1.25,
+        sim_dt=0.25,
+        rng_seed=2,
+        actuator_min=-3.0 * np.ones(3),
+        actuator_max=3.0 * np.ones(3),
+    )
+
+    assert summary["disturbance_peak_abs_x_nm"] == pytest.approx(2.0)
+
+
+@pytest.mark.unit
 def test_single_target_config_uses_requested_timing_and_mekf_noise() -> None:
     config = make_single_target_config(
         attitude_offset_deg=5.0,
@@ -119,16 +144,87 @@ def test_convergence_cli_toggles_disturbance_rejection() -> None:
 
 
 @pytest.mark.unit
+def test_convergence_cli_configures_disturbance_torque() -> None:
+    args = parse_args(
+        [
+            "--angular-rates",
+            "0.0",
+            "--disturbance-torque-nm",
+            "8e-4",
+            "-5e-4",
+            "3e-4",
+        ]
+    )
+    config = make_base_config(
+        disturbance_rejection=False,
+        disturbance_torque_nm=args.disturbance_torque_nm,
+    )
+
+    np.testing.assert_allclose(
+        config.environment.disturbance_bias,
+        np.array([8.0e-4, -5.0e-4, 3.0e-4]),
+    )
+    assert args.angular_rates_deg_s == [0.0]
+
+
+@pytest.mark.unit
 def test_robustness_cli_toggles_disturbance_rejection() -> None:
-    assert parse_robustness_args([]).disturbance_rejection is False
+    defaults = parse_robustness_args([])
+    assert defaults.disturbance_rejection is False
+    assert defaults.max_duration == pytest.approx(600.0)
+    assert defaults.initial_attitude_deg == pytest.approx(30.0)
+    assert defaults.initial_rate_deg_s == pytest.approx(0.0)
     assert (
-        parse_robustness_args(["--disturbance-rejection"]).disturbance_rejection
-        is True
+        parse_robustness_args(["--disturbance-rejection"]).disturbance_rejection is True
     )
     assert (
         parse_robustness_args(["--no-disturbance-rejection"]).disturbance_rejection
         is False
     )
+
+
+@pytest.mark.unit
+def test_robustness_scenarios_isolate_torque_and_inertia_changes() -> None:
+    base = ClosedLoopTestConfig.defaults(show_progress=False)
+    nominal_inertia = base.spacecraft.inertia
+    scenarios = _build_scenarios(base, nominal_inertia)
+
+    assert [scenario.name for scenario in scenarios] == [
+        "ideal_reference",
+        "constant_bias_reference",
+        "moderate_disturbance",
+        "severe_disturbance",
+        "inertia_mismatch",
+        "combined_uncertainty",
+    ]
+    reference_torque = np.array([8.0e-4, -5.0e-4, 3.0e-4])
+    expected_torques = [
+        np.zeros(3),
+        reference_torque,
+        5.0 * reference_torque,
+        20.0 * reference_torque,
+        reference_torque,
+        20.0 * reference_torque,
+    ]
+    for scenario, expected_torque in zip(scenarios, expected_torques):
+        np.testing.assert_allclose(
+            scenario.environment.disturbance_bias, expected_torque
+        )
+        assert scenario.environment.disturbance_noise_std is None
+        assert scenario.environment.disturbance_sinusoidal_amplitude is None
+        assert scenario.environment.disturbance_sinusoidal_frequency is None
+
+    expected_mismatched_inertia = nominal_inertia.copy()
+    diagonal = np.diag_indices(3)
+    expected_mismatched_inertia[diagonal] *= np.array([1.20, 0.85, 1.15])
+    for scenario in scenarios[:4]:
+        np.testing.assert_allclose(scenario.truth_inertia, nominal_inertia)
+    for scenario in scenarios[4:]:
+        np.testing.assert_allclose(scenario.truth_inertia, expected_mismatched_inertia)
+        np.testing.assert_allclose(
+            scenario.truth_inertia - np.diag(np.diag(scenario.truth_inertia)),
+            nominal_inertia - np.diag(np.diag(nominal_inertia)),
+        )
 
 
 @pytest.mark.integration

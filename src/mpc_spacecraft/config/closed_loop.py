@@ -31,11 +31,11 @@ class ClosedLoopEnvironmentConfig:
 
     # Unmodeled constant disturbance torque, N·m.
     disturbance_bias: FloatArray | None = field(
-        default_factory=lambda: np.array([5.0e-6, -3.0e-6, 2.0e-6], dtype=np.float64)
+        default_factory=lambda: np.array([8e-4, -5.0e-4, 3.0e-4], dtype=np.float64)
     )
 
     # Low-frequency random torque, N·m RMS.
-    disturbance_noise_std: float | None = 1.0e-7
+    disturbance_noise_std: float | None = 1.0e-5
 
     # Slow deterministic disturbance, mostly SRP / thermal / orbit geometry.
     disturbance_sinusoidal_amplitude: float | None = 5.0e-6
@@ -84,7 +84,7 @@ class ClosedLoopMPCConfig:
     )
     q_terminal: FloatArray | None = None
     model_inertia: FloatArray | None = None
-    enable_disturbance_rejection: bool = False
+    enable_disturbance_rejection: bool = True
     disturbance_observer_time_constant_s: float = 300.0
     disturbance_observer_max_abs_torque: FloatArray = field(
         default_factory=lambda: 1.0e-3 * np.ones(3, dtype=np.float64)

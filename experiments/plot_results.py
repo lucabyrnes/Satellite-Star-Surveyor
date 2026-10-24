@@ -22,7 +22,7 @@ import numpy as np
 import pandas as pd
 
 
-DEFAULT_RESULTS_PATH = Path("experiments/results/mission_results")
+DEFAULT_RESULTS_PATH = Path("experiments/results/mission_plot")
 
 COLORS = {
     "blue": "#2F80ED",

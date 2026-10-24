@@ -2,7 +2,10 @@
   "name": "learning_mpc_spacecraft",
   "build": {
     "dockerfile": "Dockerfile",
-    "context": ".."
+    "context": "..",
+    "options": [
+      "--network=host"
+    ]
   },
   "remoteUser": "root",
   "features": {},

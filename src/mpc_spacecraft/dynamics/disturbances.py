@@ -48,7 +48,7 @@ class DisturbanceModel:
                 (N*m). Enables sinusoidal torque only when both sinusoidal
                 parameters are provided and nonzero.
             sinusoidal_frequency: Frequency of sinusoidal torque disturbance
-                (rad/s). Enables sinusoidal torque only when both sinusoidal
+                (Hz). Enables sinusoidal torque only when both sinusoidal
                 parameters are provided and nonzero.
             seed: Random seed for reproducibility.
             enable_gravity: Whether to include central-gravity acceleration.
@@ -106,7 +106,7 @@ class DisturbanceModel:
 
         # Add sinusoidal component
         if self.enable_sinusoidal:
-            phase = self.sinusoidal_frequency * time
+            phase = 2.0 * np.pi * self.sinusoidal_frequency * time
             sinusoidal = self.sinusoidal_amplitude * np.array(
                 [
                     np.sin(phase),

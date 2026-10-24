@@ -1,10 +1,19 @@
+from dataclasses import dataclass
+from typing import Literal
+
 import numpy as np
 import quaternion as qu
 from scipy.linalg import expm, solve
 
 from mpc_spacecraft.utilities.utils import Vec3, skew, FloatArray, Quat, SensorRigidBodyState
 from ..dynamics.disturbances import gravity, jacobian_gravity as J_gravity
-from .sensor_models import GNSSConfig, GyroConfig, IMUConfig, StarTrackerConfig, MEKF_ERROR_STATE_SIZE
+from .sensor_models import (
+    GNSSConfig,
+    GyroConfig,
+    IMUConfig,
+    MEKF_ERROR_STATE_SIZE,
+    StarTrackerConfig,
+)
 from .mekf_state import KinematicEstimatedState
 
 IDX_R = slice(0, 3)
@@ -15,6 +24,16 @@ IDX_BA = slice(12, 15)
 
 I3 = np.eye(3)
 z3 = np.zeros((3, 3))
+
+
+@dataclass(frozen=True)
+class InnovationDiagnostic:
+    """Innovation data captured immediately before a measurement correction."""
+
+    sensor: Literal["star_tracker", "gnss"]
+    residual: FloatArray
+    covariance: FloatArray
+
 
 # @TODO: Modify to better use ArrayView state representation and clean up
 
@@ -57,6 +76,7 @@ class MEKF:
                 f"got {self.P.shape}"
             )
         self.P = 0.5 * (self.P + self.P.T)
+        self.last_innovations: tuple[InnovationDiagnostic, ...] = ()
             
 
     def update(
@@ -67,6 +87,7 @@ class MEKF:
         gnss_measure: FloatArray | None = None,
         st_measure: Quat | None = None,
     ):
+        self.last_innovations = ()
         self._predict(imu, gyro, dt)
 
         if st_measure is not None:
@@ -110,7 +131,8 @@ class MEKF:
 
         y_residual = gnss_measure - np.concatenate([self.state.r_I, self.state.v_I])
 
-        dx, P = self._kalman(H, self.R_gnss, y_residual)
+        dx, P, S = self._kalman(H, self.R_gnss, y_residual)
+        self._record_innovation("gnss", y_residual, S)
 
         self._inject_reset(dx, P)
 
@@ -124,7 +146,8 @@ class MEKF:
 
         y_residual = qu.as_rotation_vector(q_err)
 
-        dx, P = self._kalman(H, self.R_st, y_residual)
+        dx, P, S = self._kalman(H, self.R_st, y_residual)
+        self._record_innovation("star_tracker", y_residual, S)
 
         self._inject_reset(dx, P)
 
@@ -167,7 +190,20 @@ class MEKF:
         # Symmetrize to reduce numerical asymmetry
         P = 0.5 * (P_post + P_post.T)
 
-        return dx_correction, P
+        return dx_correction, P, S
+
+    def _record_innovation(
+        self,
+        sensor: Literal["star_tracker", "gnss"],
+        residual: FloatArray,
+        covariance: FloatArray,
+    ) -> None:
+        diagnostic = InnovationDiagnostic(
+            sensor=sensor,
+            residual=np.array(residual, dtype=float, copy=True),
+            covariance=np.array(covariance, dtype=float, copy=True),
+        )
+        self.last_innovations = (*self.last_innovations, diagnostic)
 
     def _form_F_G(self, accel_B: Vec3, omega_B: Vec3):
         R = qu.as_rotation_matrix(self.state.q_BI)
