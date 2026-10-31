@@ -11,7 +11,7 @@ from mpc_spacecraft.dynamics.disturbances import DisturbanceModel
 from mpc_spacecraft.dynamics.rigid_body import SpacecraftDynamics
 from mpc_spacecraft.dynamics.rigid_body_error_constraints import RigidBodyErrorConstraintBuilder
 from mpc_spacecraft.guidance.sun_tracker import AstropySunDirectionModel
-from mpc_spacecraft.utilities.utils import RotationState
+from mpc_spacecraft.utilities.utils import BODY_FORWARD_VEC3, RotationState
 
 
 @pytest.fixture
@@ -114,6 +114,50 @@ def test_error_constraint_builder_matches_legacy_constraint(dynamics, sun_model,
     np.testing.assert_allclose(A_new, step.A)
     np.testing.assert_allclose(B_new, step.B)
     np.testing.assert_allclose(c_new, step.c)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("sun_angle_deg", "expected_safe"),
+    [(40.0, True), (30.0, False)],
+)
+def test_sun_keepout_boundary_uses_boresight_angle(
+    inertia, dt, sun_angle_deg, expected_safe
+):
+    builder = RigidBodyErrorConstraintBuilder(inertia=inertia, dt=dt)
+    state = RotationState.zeros()
+    sun_angle = np.deg2rad(sun_angle_deg)
+    sun_direction = np.array([np.cos(sun_angle), np.sin(sun_angle), 0.0])
+
+    alpha, bound = builder.affine_error_theta_bc(
+        state, sun_direction, np.deg2rad(35.0)
+    )
+
+    nominal_constraint_value = -float(bound)
+    assert (nominal_constraint_value <= 0.0) is expected_safe
+    assert np.isfinite(alpha).all()
+
+
+@pytest.mark.unit
+def test_sun_keepout_boundary_is_invariant_to_boresight_roll(inertia, dt):
+    builder = RigidBodyErrorConstraintBuilder(inertia=inertia, dt=dt)
+    sun_direction = np.array(
+        [np.cos(np.deg2rad(40.0)), np.sin(np.deg2rad(40.0)), 0.0]
+    )
+    identity = RotationState.zeros()
+    rolled = RotationState.zeros()
+    rolled.quat[:] = qu.as_float_array(
+        qu.from_rotation_vector(BODY_FORWARD_VEC3 * np.deg2rad(90.0))
+    )
+
+    _, identity_bound = builder.affine_error_theta_bc(
+        identity, sun_direction, np.deg2rad(35.0)
+    )
+    _, rolled_bound = builder.affine_error_theta_bc(
+        rolled, sun_direction, np.deg2rad(35.0)
+    )
+
+    np.testing.assert_allclose(rolled_bound, identity_bound, atol=1e-12)
 
 
 class _CountingPredictionAdapter(SpacecraftErrorDynamicsProvider):

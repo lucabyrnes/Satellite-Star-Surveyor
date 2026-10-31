@@ -3,9 +3,14 @@ import pytest
 import quaternion
 
 from mpc_spacecraft.controllers.error_state_mapping import ErrorStateMappingService
-from mpc_spacecraft.dynamics.disturbances import DisturbanceModel
+from mpc_spacecraft.dynamics.disturbances import DisturbanceModel, gravity
 from mpc_spacecraft.dynamics.rigid_body import SpacecraftDynamics
-from mpc_spacecraft.utilities.utils import RigidBodyState, RotationState, TranslationState
+from mpc_spacecraft.utilities.utils import (
+    RigidBodyControl,
+    RigidBodyState,
+    RotationState,
+    TranslationState,
+)
 
 
 @pytest.fixture
@@ -20,7 +25,7 @@ def dt():
 
 @pytest.fixture
 def dynamics(inertia, dt):
-    return SpacecraftDynamics(inertia, DisturbanceModel())
+    return SpacecraftDynamics(inertia, DisturbanceModel(enable_gravity=False))
 
 
 @pytest.fixture
@@ -197,3 +202,40 @@ def test_translation_branch_rk4_constant_acceleration(dynamics):
     expected[:3] = 0.5 * accel * dt * dt
     expected[3:] = accel * dt
     np.testing.assert_allclose(next_state.data, expected, atol=1e-12)
+
+
+@pytest.mark.unit
+def test_full_state_rk4_recomputes_gravity_at_each_stage(inertia):
+    state = RigidBodyState.zeros()
+    state.position[:] = [7_078_000.0, 0.0, 0.0]
+    state.velocity[:] = [0.0, 7_504.0, 0.0]
+    control = RigidBodyControl.zeros()
+    dt = 10.0
+    dynamics = SpacecraftDynamics(inertia, DisturbanceModel(enable_gravity=True))
+
+    def translation_derivative(data):
+        derivative = np.zeros(6)
+        derivative[:3] = data[3:]
+        derivative[3:] = gravity(data[:3])
+        return derivative
+
+    initial = state.translation.data.copy()
+    k1 = translation_derivative(initial)
+    k2 = translation_derivative(initial + 0.5 * dt * k1)
+    k3 = translation_derivative(initial + 0.5 * dt * k2)
+    k4 = translation_derivative(initial + dt * k3)
+    expected = initial + (dt / 6.0) * (k1 + 2 * k2 + 2 * k3 + k4)
+
+    next_state = dynamics.discretize_dynamics_rk4_full_state(
+        state,
+        control,
+        interval_start_time=0.0,
+        delta_time=dt,
+    )
+
+    np.testing.assert_allclose(
+        next_state.translation.data,
+        expected,
+        rtol=0.0,
+        atol=1e-10,
+    )

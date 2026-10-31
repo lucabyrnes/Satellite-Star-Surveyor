@@ -6,8 +6,6 @@ from mpc_spacecraft.utilities.utils import (
     FloatArray,
     RotationState,
     RotationErrorState,
-    quat_rotate_vector_a_to_b,
-    BODY_FORWARD_VEC3,
 )
 from mpc_spacecraft.utilities.array_view_generic import BatchArrayView
 from mpc_spacecraft.guidance.sun_tracker import AstropySunDirectionModel, TimeLike
@@ -89,7 +87,6 @@ class SpacecraftErrorDynamicsProvider(ErrorDynamicsProvider):
         self, x_nom_k: RotationState, current_epoch_utc: TimeLike
     ) -> tuple[FloatArray, FloatArray]:
         sun_vec = self._sun_model.sun_dir_eci(current_epoch_utc)
-        sun_quat = quat_rotate_vector_a_to_b(BODY_FORWARD_VEC3, sun_vec)
         return self._constraint_builder.affine_error_theta_bc(
-            x_nom_k, sun_quat, self._sun_margin
+            x_nom_k, sun_vec, self._sun_margin
         )

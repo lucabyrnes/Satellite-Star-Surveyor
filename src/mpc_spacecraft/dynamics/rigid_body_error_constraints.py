@@ -11,15 +11,15 @@ import numpy as np
 import quaternion as qu
 
 from mpc_spacecraft.utilities.utils import (
+    BODY_FORWARD_VEC3,
     FloatArray,
     RotationState,
-    Quat,
     expm_so3,
     jacob_r_lie,
     jacob_r_lie_inv,
     logm_so3,
     skew,
-    unskew,
+    unit,
     z3,
 )
 
@@ -94,9 +94,12 @@ class RigidBodyErrorConstraintBuilder:
         return A_k, B_k, c_k
 
     def affine_error_theta_bc(
-        self, x_nom_k: RotationState, boundary_quat: Quat, margin_rad: float
+        self,
+        x_nom_k: RotationState,
+        boundary_direction_I: FloatArray,
+        margin_rad: float,
     ) -> tuple[FloatArray, FloatArray]:
-        """Build linearized attitude boundary coefficients for Drake MPC.
+        """Linearize an inertial-direction keep-out cone about an attitude.
 
         The outputs should be used in a linear inequality of the form
 
@@ -106,23 +109,25 @@ class RigidBodyErrorConstraintBuilder:
 
         Args:
             x_nom_k: Nominal rotational state at time step ``k``.
-            boundary_quat: Boundary/reference quaternion defining the
-                admissible orientation cone.
-            margin_rad: Allowed angular margin (radians) relative to
-                ``boundary_quat``.
+            boundary_direction_I: Inertial unit vector at the center of the
+                excluded cone.
+            margin_rad: Excluded cone half-angle in radians.
 
         Returns:
             Tuple ``(alpha_k, b_k)`` where ``alpha_k`` multiplies
             ``theta_k`` and ``b_k`` is the right-hand-side bound.
         """
-        q_k = qu.quaternion(*x_nom_k.quat)
+        q_k = qu.quaternion(*x_nom_k.quat).normalized()
         R_k = qu.as_rotation_matrix(q_k)
-        R_b = qu.as_rotation_matrix(boundary_quat)
+        boundary_direction_B = R_k.T @ unit(boundary_direction_I)
 
-        R_dif = R_b.T @ R_k
-
-        alpha_k = unskew((R_dif - R_dif.T) / 2)
-
-        b_k = np.asarray(1 + np.cos(margin_rad) - np.trace(R_dif))
-
+        # ErrorStateMappingService uses the right perturbation
+        # R(theta) = R_k Exp(theta). Linearizing the keep-out condition
+        # boundary_direction_I.T @ R(theta) @ BODY_FORWARD_VEC3 <= cos(margin)
+        # gives (BODY_FORWARD_VEC3 x boundary_direction_B).T theta <= b_k.
+        alpha_k = 0.5 * np.cross(BODY_FORWARD_VEC3, boundary_direction_B)
+        b_k = np.asarray(
+            np.cos(margin_rad)
+            - np.dot(boundary_direction_B, BODY_FORWARD_VEC3)
+        )
         return alpha_k, b_k

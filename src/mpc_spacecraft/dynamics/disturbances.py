@@ -91,10 +91,18 @@ class DisturbanceModel:
             (N*m).
         """
         disturbance = RigidBodyControl.zeros()
+        disturbance.acceleration[:] = self.get_acceleration(state.position)
+        disturbance.torque[:] = self.get_torque(time)
+        return disturbance
 
+    def get_acceleration(self, position: Vec3) -> Vec3:
+        """Compute translational disturbance acceleration at a position."""
         if self.enable_gravity:
-            disturbance.acceleration[:] = gravity(state.position)
+            return gravity(position)
+        return np.zeros(3, dtype=np.float64)
 
+    def get_torque(self, time: float) -> Vec3:
+        """Compute the torque disturbance at a given time."""
         torque_disturbance = np.zeros(3, dtype=np.float64)
 
         if self.enable_bias:
@@ -117,9 +125,7 @@ class DisturbanceModel:
             )
             torque_disturbance += sinusoidal
 
-        disturbance.torque[:] = torque_disturbance
-
-        return disturbance
+        return cast(Vec3, torque_disturbance)
 
 
 def get_atmospheric_drag(

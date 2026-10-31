@@ -200,23 +200,44 @@ def _inside_bounds(result: InnovationConsistencyResult) -> np.ndarray:
 def _plot_attitude_error(result: MEKFVerificationResult, path: Path) -> None:
     plt = _pyplot()
     scale = np.rad2deg(1.0) * 3600.0
+    history = slice(1, None)
+    initial_mean_arcsec = scale * result.mean_error[0, 6:9]
+    initial_rmse_arcsec = scale * result.attitude_rmse_rad[0]
     fig, (mean_ax, rmse_ax) = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
     for offset, axis in enumerate("xyz"):
         mean_ax.plot(
-            result.times,
-            scale * result.mean_error[:, 6 + offset],
+            result.times[history],
+            scale * result.mean_error[history, 6 + offset],
             label=rf"$\overline{{\delta\theta_{axis}}}$",
         )
     mean_ax.axhline(0.0, color="black", linewidth=0.8)
     mean_ax.set_ylabel("Mean error [arcsec]")
-    mean_ax.set_title("MEKF Monte Carlo Attitude Estimation Error")
     mean_ax.legend()
-    rmse_ax.plot(result.times, scale * result.attitude_rmse_rad, color="tab:red")
+    rmse_ax.plot(
+        result.times[history],
+        scale * result.attitude_rmse_rad[history],
+        color="tab:red",
+    )
     rmse_ax.set_xlabel("Time [s]")
     rmse_ax.set_ylabel("Rotation-vector RMSE [arcsec]")
     for axis in (mean_ax, rmse_ax):
         axis.grid(True, alpha=0.3)
-    fig.tight_layout()
+    fig.suptitle("MEKF Monte Carlo Attitude Estimation Error")
+    initial_components = ", ".join(
+        f"{axis}={value:.1f}" for axis, value in zip("xyz", initial_mean_arcsec)
+    )
+    fig.text(
+        0.5,
+        0.01,
+        (
+            "Post-first-update history shown. "
+            f"Initial mean error [arcsec]: {initial_components}; "
+            f"initial RMSE: {initial_rmse_arcsec:.1f} arcsec."
+        ),
+        ha="center",
+        fontsize=8,
+    )
+    fig.tight_layout(rect=(0.0, 0.04, 1.0, 0.97))
     fig.savefig(path, dpi=220)
     plt.close(fig)
 

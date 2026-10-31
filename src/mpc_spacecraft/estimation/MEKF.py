@@ -112,14 +112,18 @@ class MEKF:
         accel_B = imu - self.state.b_a
         R = qu.as_rotation_matrix(self.state.q_BI)
         g_I = gravity(self.state.r_I)
+        accel_I = g_I + R @ accel_B
 
-        vel = self.state.v_I + (g_I + R @ accel_B) * dt
-        pos = self.state.r_I + (vel * dt)
+        pos = self.state.r_I + self.state.v_I * dt + 0.5 * accel_I * dt**2
         q = self.state.q_BI * qu.from_rotation_vector(self.omega * dt)
+        q = q / abs(q)
+        next_R = qu.as_rotation_matrix(q)
+        next_accel_I = gravity(pos) + next_R @ accel_B
+        vel = self.state.v_I + 0.5 * (accel_I + next_accel_I) * dt
 
         self.state.r_I = pos
         self.state.v_I = vel
-        self.state.q_BI = q / abs(q)
+        self.state.q_BI = q
 
         F, G = self._form_F_G(accel_B, self.omega)
         Phi, Q_d = self._form_phi_Q(F, G, self.Q_c, dt)

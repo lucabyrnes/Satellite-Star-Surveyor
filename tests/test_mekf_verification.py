@@ -11,6 +11,7 @@ from mpc_spacecraft.analysis.mekf_verification import (
     normalized_squared_error,
     run_mekf_verification,
 )
+from mpc_spacecraft.dynamics.disturbances import gravity
 from mpc_spacecraft.estimation.MEKF import MEKF
 from mpc_spacecraft.estimation.sensor_models import (
     GNSSConfig,
@@ -38,6 +39,35 @@ def _mekf() -> MEKF:
         GNSSConfig(),
         StarTrackerConfig(),
         make_mekf_initial_covariance(),
+    )
+
+
+@pytest.mark.unit
+def test_mekf_prediction_uses_second_order_translation_update() -> None:
+    initial = _state()
+    dt = 0.1
+    initial_acceleration = gravity(initial.position)
+    expected_position = (
+        initial.position
+        + initial.velocity * dt
+        + 0.5 * initial_acceleration * dt**2
+    )
+    final_acceleration = gravity(expected_position)
+    mekf = _mekf()
+
+    estimate = mekf.update(dt, np.zeros(3), np.zeros(3))
+
+    np.testing.assert_allclose(
+        estimate.position,
+        expected_position,
+        rtol=0.0,
+        atol=1e-9,
+    )
+    np.testing.assert_allclose(
+        estimate.velocity,
+        initial.velocity + 0.5 * (initial_acceleration + final_acceleration) * dt,
+        rtol=0.0,
+        atol=1e-12,
     )
 
 

@@ -106,7 +106,9 @@ class SpacecraftDynamics:
     ) -> TranslationState:
         state_dt = TranslationState.zeros()
         state_dt.position[:] = state.velocity.copy()
-        state_dt.velocity[:] = acceleration.copy()
+        state_dt.velocity[:] = (
+            acceleration + self._disturbance_model.get_acceleration(state.position)
+        )
         return state_dt
 
     # def rotational_dynamics_error_jacobian(
@@ -207,13 +209,11 @@ class SpacecraftDynamics:
         rot_state = state.rotation
         rot_control = inputs.torque
 
-        disturbance = self._disturbance_model.get_disturbance(interval_start_time, state)
-
-        trans_acceleration = trans_control + disturbance.acceleration
-        rot_torque = rot_control + disturbance.torque
+        disturbance_torque = self._disturbance_model.get_torque(interval_start_time)
+        rot_torque = rot_control + disturbance_torque
 
         next_trans_state = self.discrete_dynamics_rk4_translation(
-            trans_state, trans_acceleration, delta_time
+            trans_state, trans_control, delta_time
         )
         next_rot_state = self.discrete_dynamics_rk4_rotation(
             rot_state, rot_torque, delta_time

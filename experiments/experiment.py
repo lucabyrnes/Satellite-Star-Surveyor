@@ -8,13 +8,18 @@ The script stores experiment logs in ``experiments/closed_loop_experiment.pkl``
 and writes figures under ``experiments/figures``.
 """
 
+from dataclasses import replace
+
 from mpc_spacecraft.simulation import (
     ClosedLoopTestConfig,
     SpacecraftPhysicalConfig,
+    TargetConfig,
     run_closed_loop_test,
 )
+from mpc_spacecraft.guidance.sun_tracker import AstropySunDirectionModel
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 import quaternion as qu
 import pickle
 from pathlib import Path
@@ -29,9 +34,64 @@ EXPERIMENT_DIR.mkdir(parents=True, exist_ok=True)
 FIGURE_DIR.mkdir(parents=True, exist_ok=True)
 
 
+def sun_crossing_keepout_config() -> ClosedLoopTestConfig:
+    """Create a three-target mission whose first inter-target slew crosses the Sun.
+
+    The first two targets are 40 degrees to either side of the Sun at mission
+    start. Thus, both are feasible under the default 35-degree keep-out angle,
+    while the shortest slew between them passes directly through the keep-out
+    region. The third target is at the south celestial pole, which remains clear
+    of Earth for the default equatorial orbit. The spacecraft retains the
+    default initial +X boresight.
+    """
+    config = ClosedLoopTestConfig.defaults()
+    sun_dir = AstropySunDirectionModel().sun_dir_eci(
+        config.timing.start_epoch_utc
+    )
+
+    initial_boresight = np.array([1.0, 0.0, 0.0], dtype=np.float64)
+    toward_boresight = initial_boresight - np.dot(initial_boresight, sun_dir) * sun_dir
+    toward_boresight /= np.linalg.norm(toward_boresight)
+    around_boresight = np.cross(initial_boresight, sun_dir)
+    around_boresight /= np.linalg.norm(around_boresight)
+
+    # Orient the Sun-crossing great circle so neither endpoint passes behind
+    # Earth as the spacecraft advances along its default orbit.
+    tangent = -around_boresight + 0.011 * toward_boresight
+    tangent /= np.linalg.norm(tangent)
+    sun_crossing_offsets_rad = np.deg2rad(np.array([40.0, -40.0]))
+    sun_crossing_directions = (
+        np.cos(sun_crossing_offsets_rad)[:, np.newaxis] * sun_dir
+        + np.sin(sun_crossing_offsets_rad)[:, np.newaxis] * tangent
+    )
+    target_directions = np.vstack(
+        (
+            sun_crossing_directions,
+            np.array([0.0, 0.0, -1.0], dtype=np.float64),
+        )
+    )
+
+    targets = pd.DataFrame(
+        {
+            "req_obs_time": [20.0, 20.0, 20.0],
+            "Dec": np.arcsin(np.clip(target_directions[:, 2], -1.0, 1.0)),
+            "RA": np.mod(
+                np.arctan2(target_directions[:, 1], target_directions[:, 0]),
+                2.0 * np.pi,
+            ),
+        }
+    )
+    return replace(
+        config,
+        targets=TargetConfig(targets=targets),
+    )
+
+
 config = ClosedLoopTestConfig.defaults(
     # spacecraft=SpacecraftPhysicalConfig.medium_space_telescope()
 )
+# Comment out this assignment to use the default configuration above instead.
+config = sun_crossing_keepout_config()
 
 result = run_closed_loop_test(config)
 

@@ -36,7 +36,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--disturbance-rejection",
         action=argparse.BooleanOptionalAction,
-        default=False,
+        default=True,
         help=(
             "enable the constant-torque observer and offset-free MPC "
             "(default: disabled)"
@@ -64,7 +64,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--angular-rates",
         type=float,
         nargs="+",
-        default=[0.0, 0.1, 0.25, 0.5],
+        default=[],
     )
     return parser.parse_args(argv)
 
